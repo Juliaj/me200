@@ -104,9 +104,8 @@ def extract_table(file_path="thermo.pdf", table_info=r134a_pressure_liquid_vapor
 
     # save dataframe to csv file
     df.to_csv(table_info["csv"], index=False)
-    print("df.shape: ", df.shape)
 
-    return df
+    return df, table_info["table_number"], [p + 1 for p in table_info["page"]]
 
 def convert_pressure_to_bar(pressure_in_atm):
     return pressure_in_atm * 1.01325
@@ -124,42 +123,46 @@ def linear_interpolation(x_star, x1, x2, y1, y2):
     # round the result to 4 decimal places
     return round(y1 + (x_star - x1) * (y2 - y1) / (x2 - x1), 4)
 
-def interpolate_data(df, value, column_name):
-    # interpolate the data to get alll properties at the given pressure
+def interpolate_data(df, column_name, value, table_name, page_number):
+    """
+    Interpolate the data to get alll properties at the given column value
+    """
 
-    # if the pressure is in the table, return the row
+    # if the column value can be found in the table, return the row
     if value in df[column_name].values:   
         return df.loc[df[column_name] == value]
     
-    # if the pressure is not in the table, find the two pressures in the table and interpolate
+    # if the column value can not be found in the table, find the two closest rows in the table and interpolate
     else:
         # find the two pressures in the table
         lower_value = df[column_name][df[column_name] < value].max()
         upper_value = df[column_name][df[column_name] > value].min()
            
         lower_row = df[df[column_name] == lower_value].iloc[0]
+        # print("lower_row: ", lower_row)
         upper_row = df[df[column_name] == upper_value].iloc[0]
+        # print("upper_row: ", upper_row)
         
-        print("interpolating data...\nvalue: ", value, "between: ", lower_value, "and", upper_value)
+        print(f"interpolating data from table: {table_name}, page: {page_number}, input_value: {value}, using: ({lower_value} and {upper_value})")
         interpolated_data = []
         interpolated_data.append(value)
 
         for column in df.columns:
             if column == column_name:
                 continue
-            value = linear_interpolation(value, lower_value, upper_value, lower_row[column], upper_row[column])
-            interpolated_data.append(value)
-            print(f"{column}: {value}")
+            calculated_value = linear_interpolation(value, lower_value, upper_value, lower_row[column], upper_row[column])
+            interpolated_data.append(calculated_value)
+            print(f"\t{column}: \t{calculated_value:.4f}, \tfrom \t({lower_row[column]:.4f}, \t{upper_row[column]:.4f})")
 
         # construct a df with interpolated data
         interpolated_df = pd.DataFrame([interpolated_data], columns=df.columns)
         return interpolated_df
 
-def interpolate_data_by_pressure(df, pressure_in_bar):
-    return interpolate_data(df, pressure_in_bar, "Press.bar")
+def interpolate_data_by_pressure(df, pressure_in_bar, table_name, page_number):
+    return interpolate_data(df, "Press.bar", pressure_in_bar, table_name, page_number)
 
-def interpolate_data_by_temperature(df, temperature):
-    return interpolate_data(df, temperature, "Temp.°C")
+def interpolate_data_by_temperature(df, temperature, table_name, page_number):
+    return interpolate_data(df, "Temp.°C", temperature, table_name, page_number)
 
 def specific_volume(vf, vg, quality):
     val = round(vf.values[0] + quality * (vg.values[0] - vf.values[0]), 4)
@@ -181,17 +184,35 @@ def entropy(sf, sg, quality):
     print(f"s = {sf.values[0]} + {quality} * ({sg.values[0]} - {sf.values[0]}) = {val}")
     return val
 
+def test_interpolation_by_pressure():
+
+    df_liquid_vapor, table_number, page_number = extract_table(file_path="thermo.pdf", table_info=r134a_pressure_liquid_vapor_table)
+
+    # test case #1, value is in the table, return the row directly
+    pressure1 = 1.2
+    interpolated_df = interpolate_data_by_pressure(df_liquid_vapor, pressure1, table_number, page_number)
+    expected_values = [1.2, -22.36, 0.0007323, 0.1614, 21.23, 214.5, 21.32, 212.54, 233.86, 0.0879, 0.9354]
+    actual_values = interpolated_df.values.flatten().tolist()
+    assert actual_values == expected_values
+
+    # test case #2, value is not in the table
+    pressure2 = convert_pressure_to_bar(1)
+    interpolated_df = interpolate_data_by_pressure(df_liquid_vapor, pressure2, table_number, page_number)
+    expected_values = [1.01325, -26.1604,0.0007, 0.1897, 16.5519, 212.3337, 16.6232, 214.893, 231.5163, 0.0691, 0.9392]
+    actual_values = interpolated_df.values.flatten().tolist()
+    assert actual_values == expected_values
 
 
 if __name__ == "__main__":    
-    extract_table(file_path="thermo.pdf", table_info=r134a_pressure_liquid_vapor_table)
-    extract_table(file_path="thermo.pdf", table_info=r134a_temperature_liquid_vapor_table)
-    extract_table(file_path="thermo.pdf", table_info=water_pressure_liquid_vapor_table)
-    extract_table(file_path="thermo.pdf", table_info=water_temperature_liquid_vapor_table)
-    extract_table(file_path="thermo.pdf", table_info=propane_pressure_liquid_vapor_table)
-    extract_table(file_path="thermo.pdf", table_info=propane_temperature_liquid_vapor_table)
-    extract_table(file_path="thermo.pdf", table_info=ammonia_pressure_liquid_vapor_table)
-    extract_table(file_path="thermo.pdf", table_info=ammonia_temperature_liquid_vapor_table)
+    test_interpolation_by_pressure()
+
+    # extract_table(file_path="thermo.pdf", table_info=r134a_temperature_liquid_vapor_table)
+    # extract_table(file_path="thermo.pdf", table_info=water_pressure_liquid_vapor_table)
+    # extract_table(file_path="thermo.pdf", table_info=water_temperature_liquid_vapor_table)
+    # extract_table(file_path="thermo.pdf", table_info=propane_pressure_liquid_vapor_table)
+    # extract_table(file_path="thermo.pdf", table_info=propane_temperature_liquid_vapor_table)
+    # extract_table(file_path="thermo.pdf", table_info=ammonia_pressure_liquid_vapor_table)
+    # extract_table(file_path="thermo.pdf", table_info=ammonia_temperature_liquid_vapor_table)
 
    
 
